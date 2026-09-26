@@ -1,0 +1,79 @@
+name: anurag-virtual-computer
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: avc
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-avc_dev_password}
+      POSTGRES_DB: avc
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U avc"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    build:
+      context: ./backend
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://avc:${POSTGRES_PASSWORD:-avc_dev_password}@postgres:5432/avc
+    command: ["node", "dist/db/migrate.js"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://avc:${POSTGRES_PASSWORD:-avc_dev_password}@postgres:5432/avc
+      REDIS_URL: redis://redis:6379
+      PROFILES_PATH: /data/profiles
+      STORAGE_LOCAL_PATH: /data/files
+    volumes:
+      - browser_profiles:/data/profiles
+      - files_storage:/data/files
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "4000:4000"
+
+  frontend:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    environment:
+      BACKEND_ORIGIN: http://backend:4000
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+
+volumes:
+  postgres_data:
+  redis_data:
+  browser_profiles:
+  files_storage:

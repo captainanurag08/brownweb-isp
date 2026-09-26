@@ -1,0 +1,56 @@
+:root {
+  /* Base palette - a graphite instrument panel, not a generic dark-SaaS theme */
+  --bg: #0e1116;
+  --surface: #161b22;
+  --surface-raised: #1d232d;
+  --border: #262d38;
+  --text: #e7eaf0;
+  --text-muted: #8891a1;
+
+  /* Brand accent: brass/amber, reserved for primary actions & focus */
+  --accent: #e8a33d;
+  --accent-strong: #f2b45a;
+  --accent-contrast: #1a1200;
+
+  /* Status semantics - meaning-bearing, not decorative */
+  --status-online: #3ddc97;
+  --status-danger: #f2555a;
+  --status-danger-strong: #ff6b70;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+
+  --font-display: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+
+  --shadow-panel: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 8px 24px rgba(0, 0, 0, 0.35);
+
+  color-scheme: dark;
+}
+
+/* Light theme override, applied when the device's theme setting is 'light'
+   or 'system' + the OS prefers light. Kept intentionally close in structure
+   to the dark palette so components don't need per-theme branching. */
+:root[data-theme='light'] {
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --surface-raised: #ffffff;
+  --border: #dde1e8;
+  --text: #171a20;
+  --text-muted: #5b6472;
+  --accent-contrast: #1a1200;
+  --shadow-panel: 0 1px 0 rgba(255, 255, 255, 0.6) inset, 0 8px 20px rgba(20, 24, 32, 0.08);
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
