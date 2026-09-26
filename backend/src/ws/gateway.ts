@@ -11,6 +11,7 @@ import { normalizeUrl, type TabInfo } from '../browser/BrowserEngine';
 import { query, queryOne } from '../db/pool';
 import { logger, loggableUrl } from '../utils/logger';
 import type { Device } from '../types';
+import type { SessionData } from 'express-session';
 
 const clientMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('input.mouse'), tabId: z.string(), action: z.enum(['move', 'down', 'up', 'dblclick']), x: z.number(), y: z.number(), button: z.enum(['left', 'right', 'middle']).optional() }),
@@ -103,8 +104,13 @@ export function attachWebSocketGateway(server: HttpServer, engine: PlaywrightCon
       socket.close(4001, 'unauthenticated');
       return;
     }
-
-    sessionStore.get(sid, async (err, sessionData) => {
+ 
+    sessionStore.get(
+  sid,
+  async (
+    err: unknown,
+    sessionData: SessionData | null,
+  ): Promise<void> => {
       if (err || !sessionData || !sessionData.userId || !sessionData.deviceId) {
         socket.close(4001, 'unauthenticated');
         return;
