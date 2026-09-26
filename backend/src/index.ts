@@ -29,6 +29,10 @@ import { attachWebSocketGateway } from './ws/gateway';
 import { objectStorage } from './storage/objectStorage';
 
 async function main() {
+  console.log('[REDIS DEBUG]', {
+  redisUrl: env.redisUrl.replace(/\/\/.*@/, '//***@'),
+  nodeEnv: process.env.NODE_ENV,
+});
   await connectRedis();
 
   const engine = new PlaywrightContextEngine();
