@@ -1,12 +1,18 @@
 import { createClient, type RedisClientType } from 'redis';
-import { RedisStore } from 'connect-redis';
+import RedisStore from 'connect-redis';
+import type { SessionData } from 'express-session';
+
 import { env } from '../config/env';
 import { logger } from '../utils/logger';
 
-export const redisClient: RedisClientType = createClient({ url: env.redisUrl });
+export const redisClient: RedisClientType = createClient({
+  url: env.redisUrl,
+});
 
-redisClient.on('error', (err) => {
-  logger.error('Redis client error', { error: String(err) });
+redisClient.on('error', (err: unknown) => {
+  logger.error('Redis client error', {
+    error: String(err),
+  });
 });
 
 export async function connectRedis(): Promise<void> {
@@ -22,8 +28,11 @@ export const sessionStore = new RedisStore({
   prefix: SESSION_PREFIX,
 });
 
-const userSessionsKey = (userId: string) => `user_sessions:${userId}`;
-const sessionMetaKey = (sid: string) => `session_meta:${sid}`;
+const userSessionsKey = (userId: string): string =>
+  `user_sessions:${userId}`;
+
+const sessionMetaKey = (sid: string): string =>
+  `session_meta:${sid}`;
 
 export interface SessionMeta {
   userAgent: string;
@@ -32,18 +41,28 @@ export interface SessionMeta {
   lastSeenAt: string;
 }
 
-/** Called on successful login: index this session under the user so it can be listed/revoked later. */
-export async function trackSession(userId: string, sid: string, meta: SessionMeta): Promise<void> {
+export async function trackSession(
+  userId: string,
+  sid: string,
+  meta: SessionMeta,
+): Promise<void> {
   await redisClient.sAdd(userSessionsKey(userId), sid);
-  await redisClient.hSet(sessionMetaKey(sid), { ...meta });
+
+  await redisClient.hSet(sessionMetaKey(sid), {
+    ...meta,
+  });
 }
 
-/** Called periodically on authenticated requests to keep "last seen" fresh. */
 export async function touchSession(sid: string): Promise<void> {
-  await redisClient.hSet(sessionMetaKey(sid), { lastSeenAt: new Date().toISOString() });
+  await redisClient.hSet(sessionMetaKey(sid), {
+    lastSeenAt: new Date().toISOString(),
+  });
 }
 
-export async function untrackSession(userId: string, sid: string): Promise<void> {
+export async function untrackSession(
+  userId: string,
+  sid: string,
+): Promise<void> {
   await redisClient.sRem(userSessionsKey(userId), sid);
   await redisClient.del(sessionMetaKey(sid));
 }
@@ -54,35 +73,77 @@ export interface ActiveSession {
   meta: SessionMeta | null;
 }
 
-export async function listActiveSessions(userId: string, currentSid: string): Promise<ActiveSession[]> {
+export async function listActiveSessions(
+  userId: string,
+  currentSid: string,
+): Promise<ActiveSession[]> {
   const ids = await redisClient.sMembers(userSessionsKey(userId));
+
   const sessions: ActiveSession[] = [];
+
   for (const id of ids) {
     const raw = await redisClient.hGetAll(sessionMetaKey(id));
-    const meta = raw && raw.userAgent ? (raw as unknown as SessionMeta) : null;
-    // A session with no metadata and no live session record is stale; skip it
-    // rather than showing a ghost entry, but don't mutate state here.
-    if (!meta) continue;
-    sessions.push({ id, isCurrent: id === currentSid, meta });
+
+    const meta = raw && raw.userAgent
+      ? (raw as unknown as SessionMeta)
+      : null;
+
+    if (!meta) {
+      continue;
+    }
+
+    sessions.push({
+      id,
+      isCurrent: id === currentSid,
+      meta,
+    });
   }
-  return sessions.sort((a, b) => (a.meta!.lastSeenAt < b.meta!.lastSeenAt ? 1 : -1));
+
+  return sessions.sort((a, b) => {
+    const aTime = a.meta?.lastSeenAt ?? '';
+    const bTime = b.meta?.lastSeenAt ?? '';
+
+    return aTime < bTime ? 1 : -1;
+  });
 }
 
-/** Force-destroys a specific session by id (used for "log out this device"). */
-export async function destroySessionById(userId: string, sid: string): Promise<void> {
+export async function destroySessionById(
+  userId: string,
+  sid: string,
+): Promise<void> {
   await new Promise<void>((resolve, reject) => {
-    sessionStore.destroy(sid, (err) => (err ? reject(err) : resolve()));
+    sessionStore.destroy(
+      sid,
+      (err?: unknown): void => {
+        if (err) {
+          reject(err);
+          return;
+        }
+
+        resolve();
+      },
+    );
   });
+
   await untrackSession(userId, sid);
 }
 
-export async function destroyAllOtherSessions(userId: string, keepSid: string): Promise<number> {
+export async function destroyAllOtherSessions(
+  userId: string,
+  keepSid: string,
+): Promise<number> {
   const ids = await redisClient.sMembers(userSessionsKey(userId));
+
   let count = 0;
+
   for (const id of ids) {
-    if (id === keepSid) continue;
+    if (id === keepSid) {
+      continue;
+    }
+
     await destroySessionById(userId, id);
     count += 1;
   }
+
   return count;
 }
