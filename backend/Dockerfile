@@ -32,4 +32,4 @@ RUN mkdir -p /data/profiles /data/files /tmp/avc-private && \
 
 USER pwuser
 EXPOSE 4000
-CMD ["node", "dist/index.js"]
+CMD ["sh", "-c", "node dist/db/migrate.js && node dist/index.js"]
