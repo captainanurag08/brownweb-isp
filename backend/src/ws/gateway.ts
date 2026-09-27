@@ -11,7 +11,6 @@ import { normalizeUrl, type TabInfo } from '../browser/BrowserEngine';
 import { query, queryOne } from '../db/pool';
 import { logger, loggableUrl } from '../utils/logger';
 import type { Device } from '../types';
-import type { SessionData } from 'express-session';
 
 const clientMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('input.mouse'), tabId: z.string(), action: z.enum(['move', 'down', 'up', 'dblclick']), x: z.number(), y: z.number(), button: z.enum(['left', 'right', 'middle']).optional() }),
@@ -53,6 +52,28 @@ function send(socket: WebSocket, payload: unknown): void {
   }
 }
 
+// Frames are sent as raw binary, not base64-in-JSON: base64 costs ~33% extra
+// bytes and a decode step on both ends, which matters a lot for something as
+// bandwidth-heavy as continuous video. Wire format: [0x01][36-byte ascii
+// tabId][raw JPEG bytes]. tabId is always a UUID (fixed 36 chars), generated
+// by this backend, so no length prefix is needed.
+const FRAME_MARKER = 0x01;
+const MAX_BUFFERED_BYTES = 2 * 1024 * 1024; // ~2MB of unsent data means the client can't keep up
+
+function sendFrame(socket: WebSocket, tabId: string, jpeg: Buffer): void {
+  if (socket.readyState !== WebSocket.OPEN) return;
+  // If the socket already has this much queued, the network or the client's
+  // decode loop is the bottleneck. Drop this frame rather than adding to a
+  // growing backlog of increasingly-stale frames - the next frame will still
+  // get through once the client catches up, keeping the stream close to
+  // real-time instead of playing "laggy catch-up" forever.
+  if (socket.bufferedAmount > MAX_BUFFERED_BYTES) return;
+  const header = Buffer.alloc(37);
+  header[0] = FRAME_MARKER;
+  header.write(tabId, 1, 36, 'ascii');
+  socket.send(Buffer.concat([header, jpeg]));
+}
+
 async function recordHistory(userId: string, sessionId: string, tabId: string, url: string, title: string) {
   if (url === 'about:blank') return;
   await query(
@@ -75,8 +96,10 @@ export function attachWebSocketGateway(server: HttpServer, engine: PlaywrightCon
     }
   }
 
-  engine.on('frame', (sessionId: string, tabId: string, data: string) => {
-    broadcast(sessionId, { type: 'tab.frame', tabId, mimeType: 'image/jpeg', data });
+  engine.on('frame', (sessionId: string, tabId: string, jpeg: Buffer) => {
+    for (const conn of connectionsBySession.get(sessionId) ?? []) {
+      sendFrame(conn.socket, tabId, jpeg);
+    }
   });
   engine.on('tabCreated', (sessionId: string, tab: TabInfo) => {
     broadcast(sessionId, { type: 'tab.created', tab });
@@ -104,13 +127,8 @@ export function attachWebSocketGateway(server: HttpServer, engine: PlaywrightCon
       socket.close(4001, 'unauthenticated');
       return;
     }
- 
-    sessionStore.get(
-  sid,
-  async (
-    err: unknown,
-    sessionData: SessionData | null,
-  ): Promise<void> => {
+
+    sessionStore.get(sid, async (err, sessionData) => {
       if (err || !sessionData || !sessionData.userId || !sessionData.deviceId) {
         socket.close(4001, 'unauthenticated');
         return;
@@ -159,7 +177,7 @@ export function attachWebSocketGateway(server: HttpServer, engine: PlaywrightCon
         const sessionId = conn.sessionId;
 
         try {
-          await sessionManager.touch(sessionId);
+          sessionManager.touch(sessionId);
           switch (msg.type) {
             case 'input.mouse':
               await engine.sendMouseEvent(sessionId, msg.tabId, msg);

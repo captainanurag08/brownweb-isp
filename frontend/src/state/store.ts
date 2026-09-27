@@ -13,6 +13,7 @@ interface StoreState {
   currentApp: AppId;
   tabs: TabInfo[];
   activeTabId: string | null;
+  sessionId: string | null;
   wsStatus: 'connecting' | 'open' | 'closed';
   locked: boolean;
   toasts: ToastNotification[];
@@ -46,7 +47,11 @@ function wireSocket(set: (fn: (s: StoreState) => Partial<StoreState>) => void, g
   browserSocket.onMessage((msg: ServerMessage) => {
     switch (msg.type) {
       case 'session.ready':
-        set(() => ({ tabs: msg.tabs, activeTabId: msg.tabs.find((t) => t.isActive)?.id ?? msg.tabs[0]?.id ?? null }));
+        set(() => ({
+          sessionId: msg.sessionId,
+          tabs: msg.tabs,
+          activeTabId: msg.tabs.find((t) => t.isActive)?.id ?? msg.tabs[0]?.id ?? null,
+        }));
         break;
       case 'tab.created':
         set((s) => ({ tabs: [...s.tabs, msg.tab], activeTabId: msg.tab.isActive ? msg.tab.id : s.activeTabId }));
@@ -79,6 +84,7 @@ export const useStore = create<StoreState>((set, get) => ({
   currentApp: 'home',
   tabs: [],
   activeTabId: null,
+  sessionId: null,
   wsStatus: 'closed',
   locked: false,
   toasts: [],

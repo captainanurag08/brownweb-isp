@@ -29,27 +29,6 @@ import { attachWebSocketGateway } from './ws/gateway';
 import { objectStorage } from './storage/objectStorage';
 
 async function main() {
-  console.log('[REDIS DEBUG]', {
-  redisUrl: env.redisUrl.replace(/\/\/.*@/, '//***@'),
-  nodeEnv: process.env.NODE_ENV,
-});
-  console.log('[CONFIG CHECK]', {
-  databaseHost: (() => {
-    try {
-      return new URL(env.databaseUrl).hostname;
-    } catch {
-      return 'INVALID_DATABASE_URL';
-    }
-  })(),
-  redisHost: (() => {
-    try {
-      return new URL(env.redisUrl).hostname;
-    } catch {
-      return 'INVALID_REDIS_URL';
-    }
-  })(),
-  nodeEnv: env.nodeEnv,
-});
   await connectRedis();
 
   const engine = new PlaywrightContextEngine();

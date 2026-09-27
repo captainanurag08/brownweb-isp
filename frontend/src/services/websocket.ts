@@ -20,6 +20,7 @@ class BrowserSocket {
     this.setStatus('connecting');
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     this.socket = new WebSocket(`${protocol}//${window.location.host}/ws`);
+    this.socket.binaryType = 'arraybuffer';
 
     this.socket.addEventListener('open', () => {
       this.reconnectDelay = 1000;
@@ -27,6 +28,10 @@ class BrowserSocket {
     });
 
     this.socket.addEventListener('message', (event) => {
+      if (event.data instanceof ArrayBuffer) {
+        this.handleBinaryFrame(event.data);
+        return;
+      }
       try {
         const msg = JSON.parse(event.data) as ServerMessage;
         this.listeners.forEach((l) => l(msg));
@@ -46,6 +51,14 @@ class BrowserSocket {
     this.socket.addEventListener('error', () => {
       this.socket?.close();
     });
+  }
+
+  private handleBinaryFrame(data: ArrayBuffer): void {
+    const bytes = new Uint8Array(data);
+    if (bytes[0] !== 0x01) return; // unrecognized marker, ignore
+    const tabId = new TextDecoder('ascii').decode(bytes.subarray(1, 37));
+    const blob = new Blob([bytes.subarray(37)], { type: 'image/jpeg' });
+    this.listeners.forEach((l) => l({ type: 'tab.frame', tabId, blob }));
   }
 
   disconnect(): void {

@@ -8,6 +8,15 @@ import { AppError } from '../utils/AppError';
 import type { BrowserSessionRow, SessionMode } from '../types';
 
 export class SessionManager {
+  // In-memory activity tracking: touch() is called on every WebSocket
+  // message, including high-frequency mouse-move events, so it must be
+  // free. The previous version awaited a Postgres UPDATE here, which put a
+  // full DB round-trip in front of every single input event - the main
+  // cause of sluggish input. Real timestamps are flushed to Postgres in a
+  // batch periodically instead (see flushActivity), which is all the idle
+  // sweep actually needs.
+  private activity = new Map<string, number>();
+
   constructor(private readonly engine: PlaywrightContextEngine) {}
 
   private profileDirFor(userId: string, sessionId: string, mode: SessionMode): string {
@@ -38,6 +47,7 @@ export class SessionManager {
           existing.id,
         ]);
       }
+      this.activity.set(existing.id, Date.now());
       return existing;
     }
 
@@ -66,6 +76,7 @@ export class SessionManager {
       await this.engine.newTab(sessionId, 'https://www.google.com/');
       await query(`UPDATE browser_sessions SET status = 'running' WHERE id = $1`, [sessionId]);
       row.status = 'running';
+      this.activity.set(sessionId, Date.now());
     } catch (err) {
       await query(`UPDATE browser_sessions SET status = 'crashed' WHERE id = $1`, [sessionId]);
       logger.error('Failed to start browser session', { sessionId, error: String(err) });
@@ -75,8 +86,22 @@ export class SessionManager {
     return row;
   }
 
-  async touch(sessionId: string): Promise<void> {
-    await query(`UPDATE browser_sessions SET last_activity_at = now() WHERE id = $1`, [sessionId]);
+  /** Cheap, synchronous activity marker - safe to call on every input event. */
+  touch(sessionId: string): void {
+    this.activity.set(sessionId, Date.now());
+  }
+
+  /** Batches the in-memory activity timestamps into Postgres. Call this on an interval, not per-event. */
+  async flushActivity(): Promise<void> {
+    if (this.activity.size === 0) return;
+    const entries = [...this.activity.entries()];
+    this.activity.clear();
+    await query(
+      `UPDATE browser_sessions SET last_activity_at = data.ts
+       FROM (SELECT * FROM unnest($1::uuid[], $2::timestamptz[]) AS t(id, ts)) AS data
+       WHERE browser_sessions.id = data.id`,
+      [entries.map(([id]) => id), entries.map(([, ts]) => new Date(ts))]
+    ).catch((err) => logger.error('Failed to flush session activity', { error: String(err) }));
   }
 
   /** Stops the browser process but keeps the profile on disk (persistent mode). */
@@ -102,6 +127,8 @@ export class SessionManager {
    * destroyed. Call this on an interval from index.ts.
    */
   async sweepIdleSessions(): Promise<void> {
+    await this.flushActivity();
+
     const idlePersistent = await query<BrowserSessionRow>(
       `SELECT * FROM browser_sessions WHERE status IN ('running','idle') AND mode = 'persistent'
        AND last_activity_at < now() - ($1 || ' minutes')::interval`,

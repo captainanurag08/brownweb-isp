@@ -11,26 +11,38 @@ const SPECIAL_KEYS = new Set([
 export function BrowserView({ tabId }: { tabId: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const hiddenInputRef = useRef<HTMLInputElement>(null);
-  const imgRef = useRef(new Image());
-  const naturalSize = useRef({ width: 1280, height: 800 });
+  const lastMoveSent = useRef(0);
 
   useEffect(() => {
+    let cancelled = false;
     const unsub = browserSocket.onMessage((msg: ServerMessage) => {
       if (msg.type !== 'tab.frame' || msg.tabId !== tabId) return;
-      const img = imgRef.current;
-      img.onload = () => {
-        naturalSize.current = { width: img.naturalWidth, height: img.naturalHeight };
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-        if (canvas.width !== img.naturalWidth || canvas.height !== img.naturalHeight) {
-          canvas.width = img.naturalWidth;
-          canvas.height = img.naturalHeight;
-        }
-        canvas.getContext('2d')?.drawImage(img, 0, 0);
-      };
-      img.src = `data:${msg.mimeType};base64,${msg.data}`;
+      createImageBitmap(msg.blob)
+        .then((bitmap) => {
+          if (cancelled) {
+            bitmap.close();
+            return;
+          }
+          const canvas = canvasRef.current;
+          if (!canvas) {
+            bitmap.close();
+            return;
+          }
+          if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+            canvas.width = bitmap.width;
+            canvas.height = bitmap.height;
+          }
+          canvas.getContext('2d')?.drawImage(bitmap, 0, 0);
+          bitmap.close();
+        })
+        .catch(() => {
+          /* a corrupt/partial frame is not worth surfacing - the next one will arrive shortly */
+        });
     });
-    return unsub;
+    return () => {
+      cancelled = true;
+      unsub();
+    };
   }, [tabId]);
 
   useEffect(() => {
@@ -73,13 +85,11 @@ export function BrowserView({ tabId }: { tabId: string }) {
           browserSocket.send({ type: 'input.mouse', tabId, action: 'up', x, y, button: e.button === 2 ? 'right' : 'left' });
         }}
         onPointerMove={(e) => {
-          if (e.buttons === 0 && e.pointerType === 'mouse') {
-            const { x, y } = toRemoteCoords(e.clientX, e.clientY);
-            browserSocket.send({ type: 'input.mouse', tabId, action: 'move', x, y });
-          } else if (e.buttons > 0) {
-            const { x, y } = toRemoteCoords(e.clientX, e.clientY);
-            browserSocket.send({ type: 'input.mouse', tabId, action: 'move', x, y });
-          }
+          const now = performance.now();
+          if (now - lastMoveSent.current < 16) return; // ~60/s cap is plenty for a remote cursor
+          lastMoveSent.current = now;
+          const { x, y } = toRemoteCoords(e.clientX, e.clientY);
+          browserSocket.send({ type: 'input.mouse', tabId, action: 'move', x, y });
         }}
         onWheel={(e) => {
           browserSocket.send({ type: 'input.wheel', tabId, deltaX: e.deltaX, deltaY: e.deltaY });

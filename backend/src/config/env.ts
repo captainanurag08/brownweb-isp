@@ -62,6 +62,13 @@ export const env = {
   screencastQuality: int('SCREENCAST_QUALITY', 60),
   screencastMaxWidth: int('SCREENCAST_MAX_WIDTH', 1440),
   screencastMaxHeight: int('SCREENCAST_MAX_HEIGHT', 900),
+
+  // Headless Chromium does not reliably produce capturable audio output, so
+  // audio support requires running headful inside a virtual display (Xvfb) -
+  // see docker-entrypoint.sh and docs/DEPLOYMENT.md. Set to true to go back
+  // to lighter-weight headless mode if you don't need in-browser audio.
+  browserHeadless: bool('BROWSER_HEADLESS', false),
+  audioEnabled: bool('AUDIO_ENABLED', true),
 };
 
 export type Env = typeof env;

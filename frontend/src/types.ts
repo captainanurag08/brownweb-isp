@@ -69,7 +69,7 @@ export type ClientMessage =
 
 export type ServerMessage =
   | { type: 'session.ready'; sessionId: string; tabs: TabInfo[] }
-  | { type: 'tab.frame'; tabId: string; mimeType: string; data: string }
+  | { type: 'tab.frame'; tabId: string; blob: Blob }
   | { type: 'tab.created'; tab: TabInfo }
   | { type: 'tab.updated'; tab: TabInfo }
   | { type: 'tab.closed'; tabId: string }

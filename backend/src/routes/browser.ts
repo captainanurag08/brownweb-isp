@@ -4,6 +4,7 @@ import { requireAuth } from '../auth/middleware';
 import { validate } from '../middleware/validate';
 import { queryOne } from '../db/pool';
 import { normalizeUrl } from '../browser/BrowserEngine';
+import { streamSessionAudio } from '../browser/audioCapture';
 import { AppError } from '../utils/AppError';
 import type { PlaywrightContextEngine } from '../browser/PlaywrightContextEngine';
 import type { SessionManager } from '../browser/SessionManager';
@@ -114,6 +115,18 @@ export function buildBrowserRouter(engine: PlaywrightContextEngine, sessionManag
       }
     });
   }
+
+  router.get('/audio', async (req, res, next) => {
+    try {
+      const row = await currentSession(req.auth!.userId);
+      res.setHeader('Content-Type', 'audio/mpeg');
+      res.setHeader('Cache-Control', 'no-store');
+      const capture = streamSessionAudio(row.id, res);
+      req.on('close', () => capture.stop());
+    } catch (err) {
+      next(err);
+    }
+  });
 
   return router;
 }

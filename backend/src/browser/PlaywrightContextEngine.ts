@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import fs from 'fs/promises';
 import { chromium, type BrowserContext, type Page, type CDPSession } from 'playwright';
 import { BrowserEngine, type TabInfo } from './BrowserEngine';
+import { createSessionSink, destroySessionSink } from './audioCapture';
 import { env } from '../config/env';
 import { logger } from '../utils/logger';
 
@@ -54,17 +55,21 @@ export class PlaywrightContextEngine extends BrowserEngine {
   async createSession(sessionId: string, opts: { mode: 'persistent' | 'private'; profileDir: string }): Promise<void> {
     await fs.mkdir(opts.profileDir, { recursive: true });
 
+    const sinkName = env.audioEnabled ? await createSessionSink(sessionId) : null;
+
     const context = await chromium.launchPersistentContext(opts.profileDir, {
-      headless: true,
+      headless: env.browserHeadless,
       viewport: { width: env.screencastMaxWidth, height: env.screencastMaxHeight },
       hasTouch: true,
       isMobile: false,
       acceptDownloads: true,
       ignoreHTTPSErrors: false,
+      env: sinkName ? { ...process.env, PULSE_SINK: sinkName } : undefined,
       args: [
         '--no-sandbox', // see docs/DEPLOYMENT.md: trade-off documented there
         '--disable-dev-shm-usage',
         '--disable-gpu',
+        '--autoplay-policy=no-user-gesture-required',
       ],
     });
 
@@ -187,7 +192,7 @@ export class PlaywrightContextEngine extends BrowserEngine {
     tab.screencastActive = true;
 
     cdp.on('Page.screencastFrame', async (frame: { data: string; sessionId: number }) => {
-      this.emit('frame', sessionId, tabId, frame.data);
+      this.emit('frame', sessionId, tabId, Buffer.from(frame.data, 'base64'));
       try {
         await cdp.send('Page.screencastFrameAck', { sessionId: frame.sessionId });
       } catch {
@@ -325,6 +330,7 @@ export class PlaywrightContextEngine extends BrowserEngine {
     session.intentionalClose = true;
     await session.context.close().catch(() => undefined);
     this.sessions.delete(sessionId);
+    if (env.audioEnabled) await destroySessionSink(sessionId);
   }
 
   /** Stops the browser and permanently deletes its profile directory (private sessions / explicit destroy). */

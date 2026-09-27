@@ -134,7 +134,41 @@ frontend/
 docs/DEPLOYMENT.md   TLS, scaling, container-isolation extension, security checklist
 ```
 
-## Privacy, honestly
+## Changelog
+
+**Speed fixes:**
+- `SessionManager.touch()` was awaiting a Postgres write on *every* WebSocket
+  message, including every mouse-move — a DB round-trip in front of every
+  input event. It's now an in-memory update, flushed to Postgres in a batch
+  every idle-sweep tick instead.
+- Screencast frames now go over the wire as raw binary (`[marker][tabId][JPEG bytes]`)
+  instead of base64-encoded inside JSON, and are decoded client-side with
+  `createImageBitmap` instead of an `<img>`/data-URI. Cuts payload size ~25%
+  and removes a decode step on both ends.
+- A slow client's WebSocket buffer is now checked before sending each frame;
+  if it's backed up, that frame is dropped rather than queuing, so the stream
+  stays close to real-time instead of falling further and further behind.
+- Pointer-move events are throttled to ~60/s client-side instead of forwarding
+  every native browser event.
+
+**Layout fix:** the dock used `flex-direction: column-reverse`/`row-reverse` to
+place itself, which actually rendered it in the wrong spot (top instead of
+bottom on mobile) and could crowd out the space you needed to scroll into.
+Replaced with explicit `order`, plus a defensive `overflow-y: auto` fallback
+on the content area.
+
+**Audio (new):** wasn't implemented at all before. Headless Chromium doesn't
+reliably produce capturable audio, so the engine now launches Chromium
+*headful* inside a virtual display (Xvfb), with each session's audio routed to
+its own PulseAudio null-sink (so concurrent users' audio never mixes). An
+ffmpeg process captures that sink on request and streams it as MP3 from
+`GET /api/browser/audio`, played by a plain `<audio>` tag with a mute toggle
+(browsers block unmuted autoplay, so it starts muted — click the speaker icon).
+**This is the least-tested part of the whole project** — it depends on
+PulseAudio/ffmpeg/Xvfb all cooperating inside the container, which isn't
+something I can verify without actually running it. If you don't hear audio,
+see the troubleshooting comment at the top of `backend/src/browser/audioCapture.ts`.
+
 
 ANURAG VIRTUAL COMPUTER keeps its own history, bookmarks, and profile data,
 separate from your physical device. It does **not** make you anonymous:
