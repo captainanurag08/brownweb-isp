@@ -1,5 +1,5 @@
 import { createClient, type RedisClientType } from 'redis';
-import { RedisStore } from 'connect-redis';
+import RedisStore from 'connect-redis';
 import { env } from '../config/env';
 import { logger } from '../utils/logger';
 
