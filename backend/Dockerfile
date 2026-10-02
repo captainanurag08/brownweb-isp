@@ -1,28 +1,33 @@
-# Keep this version synchronized with the Playwright npm package.
+# ============================================================
+# ANURAG VIRTUAL COMPUTER
+# Backend Dockerfile
+# ============================================================
+
 ARG PLAYWRIGHT_VERSION=v1.63.0
+
 
 # ============================================================
 # BUILD STAGE
 # ============================================================
+
 FROM mcr.microsoft.com/playwright:${PLAYWRIGHT_VERSION}-noble AS build
 
 WORKDIR /app
 
-# Install backend dependencies
 COPY package*.json ./
+
 RUN npm install --package-lock=false
 
-# Copy TypeScript configuration and source
 COPY tsconfig.json ./
 COPY src ./src
 
-# Compile TypeScript
 RUN npm run build
 
 
 # ============================================================
 # RUNTIME STAGE
 # ============================================================
+
 FROM mcr.microsoft.com/playwright:${PLAYWRIGHT_VERSION}-noble
 
 ENV NODE_ENV=production
@@ -30,24 +35,11 @@ ENV HOME=/home/pwuser
 
 WORKDIR /app
 
-# ------------------------------------------------------------
-# System packages
-# ------------------------------------------------------------
-# Xvfb:
-#   Virtual X display for headful Chromium
-#
-# PulseAudio:
-#   Virtual audio server
-#
-# ffmpeg:
-#   Audio capture/processing
-#
-# pulseaudio-utils:
-#   pactl and related PulseAudio utilities
-#
-# x11-utils:
-#   xdpyinfo, used to verify Xvfb is actually ready
-# ------------------------------------------------------------
+
+# ============================================================
+# SYSTEM PACKAGES
+# ============================================================
+
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         xvfb \
@@ -58,18 +50,21 @@ RUN apt-get update && \
     && rm -rf /var/lib/apt/lists/*
 
 
-# ------------------------------------------------------------
-# Production npm dependencies
-# ------------------------------------------------------------
+# ============================================================
+# PRODUCTION DEPENDENCIES
+# ============================================================
+
 COPY package*.json ./
 
 RUN npm install --omit=dev --package-lock=false
 
 
-# ------------------------------------------------------------
-# Application files
-# ------------------------------------------------------------
+# ============================================================
+# APPLICATION
+# ============================================================
+
 COPY --from=build /app/dist ./dist
+
 COPY db ./db
 
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
@@ -77,46 +72,51 @@ COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 
-# ------------------------------------------------------------
-# Runtime directories
-# ------------------------------------------------------------
-#
-# IMPORTANT:
-#
-# /tmp/.X11-unix MUST:
-#   - exist before switching to pwuser
-#   - remain owned by root
-#   - have mode 1777
-#
-# Xvfb checks this directory when starting.
-#
-# Do NOT chown this directory to pwuser.
-# ------------------------------------------------------------
+# ============================================================
+# APPLICATION DIRECTORIES
+# ============================================================
+
 RUN mkdir -p \
         /data/profiles \
         /data/files \
         /tmp/avc-private \
         /tmp/runtime-pwuser \
-        /tmp/.X11-unix \
         /home/pwuser && \
-    chown root:root /tmp/.X11-unix && \
-    chmod 1777 /tmp/.X11-unix && \
-    chmod 700 /tmp/runtime-pwuser && \
     chown -R pwuser:pwuser \
         /app \
         /data \
         /tmp/avc-private \
         /tmp/runtime-pwuser \
-        /home/pwuser
+        /home/pwuser && \
+    chmod 700 /tmp/runtime-pwuser
 
 
-# ------------------------------------------------------------
-# Run Chromium/backend as non-root
-# ------------------------------------------------------------
-USER pwuser
+# ============================================================
+# IMPORTANT
+# ============================================================
+#
+# DO NOT use:
+#
+# USER pwuser
+#
+# here.
+#
+# The entrypoint needs temporary root privileges at container
+# startup to recreate /tmp/.X11-unix because /tmp can be reset
+# when the container starts.
+#
+# The entrypoint creates the X11 directory as:
+#
+#     root:root
+#     chmod 1777
+#
+# and then drops to pwuser before starting Xvfb, PulseAudio
+# and Node.
+# ============================================================
+
 
 EXPOSE 4000
 
-ENTRYPOINT ["docker-entrypoint.sh"]
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 
 CMD ["node", "dist/index.js"]
