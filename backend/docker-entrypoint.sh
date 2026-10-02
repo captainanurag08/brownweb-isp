@@ -4,6 +4,19 @@ set -eu
 
 
 # ============================================================
+# ANURAG VIRTUAL COMPUTER
+# CONTAINER ENTRYPOINT
+# ============================================================
+
+echo ""
+echo "=========================================="
+echo " ANURAG VIRTUAL COMPUTER"
+echo " Container startup"
+echo "=========================================="
+echo ""
+
+
+# ============================================================
 # CONFIGURATION
 # ============================================================
 
@@ -14,258 +27,357 @@ export XDG_RUNTIME_DIR=/tmp/runtime-pwuser
 XVFB_DISPLAY=":99"
 XVFB_SCREEN="1600x1000x24"
 
-XVFB_PID=""
-
-PULSEAUDIO_PID=""
-
-
-# ============================================================
-# BASIC DIRECTORY CHECKS
-# ============================================================
-
-echo "=========================================="
-echo " ANURAG VIRTUAL COMPUTER"
-echo " Container startup"
-echo "=========================================="
-
-echo "Checking X11 directory..."
-
-if [ ! -d /tmp/.X11-unix ]; then
-    echo "ERROR: /tmp/.X11-unix does not exist."
-    echo "The Docker image was not built correctly."
-    exit 1
-fi
-
-echo "X11 directory exists."
-
-echo "Checking XDG runtime directory..."
-
-mkdir -p "$XDG_RUNTIME_DIR"
-
-chmod 700 "$XDG_RUNTIME_DIR"
-
-echo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
+APP_USER="pwuser"
+APP_GROUP="pwuser"
 
 
 # ============================================================
-# CLEAN OLD X LOCK
+# CHECK CURRENT USER
+# ============================================================
+
+echo "Container user:"
+whoami
+
+echo ""
+
+
+# ============================================================
+# CREATE X11 SOCKET DIRECTORY
 # ============================================================
 #
-# Render normally starts a fresh container, but this prevents
-# a stale lock from blocking Xvfb if the container runtime
-# leaves one behind.
+# THIS MUST HAPPEN AT RUNTIME.
 #
-# We ONLY remove the lock when no X server is responding.
+# Docker image creation happens earlier, but /tmp may be reset
+# when the container actually starts.
+#
+# Xvfb requires:
+#
+#   /tmp/.X11-unix
+#
+# owned by root with mode 1777.
 # ============================================================
 
-if [ -f /tmp/.X99-lock ]; then
+echo "Preparing X11 runtime directory..."
 
-    echo "Found existing X99 lock."
+mkdir -p /tmp/.X11-unix
 
-    if xdpyinfo -display "$XVFB_DISPLAY" >/dev/null 2>&1; then
+chown root:root /tmp/.X11-unix
 
-        echo "An X server is already running on $XVFB_DISPLAY."
+chmod 1777 /tmp/.X11-unix
 
-    else
+echo "X11 directory:"
+ls -ld /tmp/.X11-unix
 
-        echo "No active X server found."
-        echo "Removing stale X99 lock."
-
-        rm -f /tmp/.X99-lock
-
-    fi
-fi
-
-
-# ============================================================
-# START XVFB
-# ============================================================
-
-echo "Starting Xvfb on $XVFB_DISPLAY..."
-
-Xvfb "$XVFB_DISPLAY" \
-    -screen 0 "$XVFB_SCREEN" \
-    -nolisten tcp \
-    -ac \
-    +extension GLX \
-    +extension RANDR \
-    +extension RENDER &
-
-XVFB_PID=$!
+echo ""
 
 
 # ============================================================
-# WAIT FOR XVFB
+# PREPARE APPLICATION RUNTIME DIRECTORIES
 # ============================================================
 
-echo "Waiting for Xvfb..."
+echo "Preparing application runtime directories..."
 
-XVFB_READY=0
+mkdir -p \
+    /tmp/runtime-pwuser \
+    /tmp/avc-private \
+    /data/profiles \
+    /data/files \
+    /home/pwuser
 
-i=0
+chown "$APP_USER:$APP_GROUP" \
+    /tmp/runtime-pwuser \
+    /tmp/avc-private \
+    /data/profiles \
+    /data/files \
+    /home/pwuser
 
-while [ "$i" -lt 30 ]; do
+chmod 700 /tmp/runtime-pwuser
 
-    if xdpyinfo -display "$XVFB_DISPLAY" >/dev/null 2>&1; then
+echo "Runtime directories ready."
 
-        XVFB_READY=1
-        break
-
-    fi
-
-    if ! kill -0 "$XVFB_PID" 2>/dev/null; then
-
-        echo "ERROR: Xvfb exited unexpectedly."
-
-        wait "$XVFB_PID" 2>/dev/null || true
-
-        exit 1
-
-    fi
-
-    i=$((i + 1))
-
-    sleep 1
-
-done
-
-
-if [ "$XVFB_READY" -ne 1 ]; then
-
-    echo "ERROR: Timed out waiting for Xvfb."
-
-    if kill -0 "$XVFB_PID" 2>/dev/null; then
-        kill "$XVFB_PID" 2>/dev/null || true
-    fi
-
-    exit 1
-
-fi
-
-
-echo "Xvfb is ready."
-
-echo "DISPLAY=$DISPLAY"
+echo ""
 
 
 # ============================================================
-# START PULSEAUDIO
+# PREPARE PULSEAUDIO DIRECTORY
 # ============================================================
 
-echo "Starting PulseAudio..."
+mkdir -p /tmp/runtime-pwuser/pulse
 
+chown -R "$APP_USER:$APP_GROUP" /tmp/runtime-pwuser
 
-# Remove stale PulseAudio PID/socket information if present.
-# These are inside the per-user runtime directory, so this is
-# safe for the pwuser container user.
-rm -f \
-    "$XDG_RUNTIME_DIR/pulse/pid" \
-    "$XDG_RUNTIME_DIR/pulse/native" \
-    2>/dev/null || true
+chmod 700 /tmp/runtime-pwuser
 
+echo "PulseAudio runtime directory ready."
 
-pulseaudio \
-    --exit-idle-time=-1 \
-    --daemonize=no \
-    --log-target=stderr &
-
-PULSEAUDIO_PID=$!
+echo ""
 
 
 # ============================================================
-# WAIT FOR PULSEAUDIO
+# DROP PRIVILEGES
+# ============================================================
+#
+# Everything below this point runs as pwuser.
+#
+# We deliberately do NOT run the browser/backend as root.
 # ============================================================
 
-echo "Waiting for PulseAudio..."
+echo "Switching from root to $APP_USER..."
 
-PULSE_READY=0
+exec su \
+    -s /bin/sh \
+    "$APP_USER" \
+    -c '
+        set -eu
 
-i=0
+        export DISPLAY=:99
+        export XDG_RUNTIME_DIR=/tmp/runtime-pwuser
 
-while [ "$i" -lt 30 ]; do
-
-    if pactl info >/dev/null 2>&1; then
-
-        PULSE_READY=1
-        break
-
-    fi
-
-    if ! kill -0 "$PULSEAUDIO_PID" 2>/dev/null; then
-
-        echo "WARNING: PulseAudio exited."
-
-        break
-
-    fi
-
-    i=$((i + 1))
-
-    sleep 1
-
-done
+        XVFB_DISPLAY=":99"
+        XVFB_SCREEN="1600x1000x24"
 
 
-# ============================================================
-# PULSEAUDIO RESULT
-# ============================================================
+        echo ""
+        echo "=========================================="
+        echo " ANURAG VIRTUAL COMPUTER"
+        echo " User runtime"
+        echo "=========================================="
+        echo ""
 
-if [ "$PULSE_READY" -eq 1 ]; then
+        echo "Running as:"
+        whoami
 
-    echo "PulseAudio is ready."
+        echo ""
 
-    echo "Audio server:"
-    pactl info 2>/dev/null | grep -E \
-        'Server Name|Server String|Default Sink|Default Source' \
-        || true
+        echo "DISPLAY=$DISPLAY"
+        echo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
 
-else
-
-    echo "WARNING: PulseAudio could not be started."
-
-    echo "The virtual computer will continue without audio."
-
-fi
+        echo ""
 
 
-# ============================================================
-# FINAL ENVIRONMENT CHECK
-# ============================================================
+        # ====================================================
+        # CLEAN STALE X LOCK
+        # ====================================================
 
-echo "=========================================="
-echo " Runtime environment"
-echo "=========================================="
+        if [ -f /tmp/.X99-lock ]; then
 
-echo "User:"
-whoami || true
+            echo "Found /tmp/.X99-lock"
 
-echo "DISPLAY:"
-echo "$DISPLAY"
+            if xdpyinfo -display "$XVFB_DISPLAY" >/dev/null 2>&1; then
 
-echo "XDG_RUNTIME_DIR:"
-echo "$XDG_RUNTIME_DIR"
+                echo "An X server is already running."
 
-echo "X11:"
-if xdpyinfo -display "$DISPLAY" >/dev/null 2>&1; then
-    echo "READY"
-else
-    echo "NOT READY"
-fi
+            else
 
-echo "PulseAudio:"
-if pactl info >/dev/null 2>&1; then
-    echo "READY"
-else
-    echo "UNAVAILABLE"
-fi
+                echo "Removing stale Xvfb lock."
 
-echo "=========================================="
-echo " Starting ANURAG VIRTUAL COMPUTER backend"
-echo "=========================================="
+                rm -f /tmp/.X99-lock
+
+            fi
+
+        fi
 
 
-# ============================================================
-# START NODE BACKEND
-# ============================================================
+        # ====================================================
+        # START XVFB
+        # ====================================================
 
-exec "$@"
+        echo "Starting Xvfb..."
+
+        Xvfb "$XVFB_DISPLAY" \
+            -screen 0 "$XVFB_SCREEN" \
+            -nolisten tcp \
+            -ac \
+            +extension GLX \
+            +extension RANDR \
+            +extension RENDER &
+
+        XVFB_PID=$!
+
+
+        # ====================================================
+        # WAIT FOR XVFB
+        # ====================================================
+
+        echo "Waiting for Xvfb..."
+
+        XVFB_READY=0
+
+        i=0
+
+        while [ "$i" -lt 30 ]; do
+
+            if xdpyinfo -display "$XVFB_DISPLAY" >/dev/null 2>&1; then
+
+                XVFB_READY=1
+                break
+
+            fi
+
+            if ! kill -0 "$XVFB_PID" 2>/dev/null; then
+
+                echo ""
+                echo "ERROR: Xvfb exited unexpectedly."
+
+                wait "$XVFB_PID" 2>/dev/null || true
+
+                exit 1
+
+            fi
+
+            i=$((i + 1))
+
+            sleep 1
+
+        done
+
+
+        if [ "$XVFB_READY" -ne 1 ]; then
+
+            echo ""
+            echo "ERROR: Timed out waiting for Xvfb."
+
+            if kill -0 "$XVFB_PID" 2>/dev/null; then
+                kill "$XVFB_PID" 2>/dev/null || true
+            fi
+
+            exit 1
+
+        fi
+
+
+        echo "Xvfb is READY."
+
+        echo "DISPLAY=$DISPLAY"
+
+        echo ""
+
+
+        # ====================================================
+        # START PULSEAUDIO
+        # ====================================================
+
+        echo "Starting PulseAudio..."
+
+
+        # Remove stale user PulseAudio files.
+
+        rm -f \
+            "$XDG_RUNTIME_DIR/pulse/pid" \
+            "$XDG_RUNTIME_DIR/pulse/native" \
+            2>/dev/null || true
+
+
+        pulseaudio \
+            --exit-idle-time=-1 \
+            --daemonize=no \
+            --log-target=stderr &
+
+        PULSEAUDIO_PID=$!
+
+
+        # ====================================================
+        # WAIT FOR PULSEAUDIO
+        # ====================================================
+
+        echo "Waiting for PulseAudio..."
+
+        PULSE_READY=0
+
+        i=0
+
+        while [ "$i" -lt 30 ]; do
+
+            if pactl info >/dev/null 2>&1; then
+
+                PULSE_READY=1
+                break
+
+            fi
+
+            if ! kill -0 "$PULSEAUDIO_PID" 2>/dev/null; then
+
+                echo "WARNING: PulseAudio exited."
+
+                break
+
+            fi
+
+            i=$((i + 1))
+
+            sleep 1
+
+        done
+
+
+        # ====================================================
+        # PULSEAUDIO STATUS
+        # ====================================================
+
+        if [ "$PULSE_READY" -eq 1 ]; then
+
+            echo "PulseAudio is READY."
+
+            pactl info 2>/dev/null | \
+                grep -E \
+                "Server Name|Server String|Default Sink|Default Source" \
+                || true
+
+        else
+
+            echo "WARNING: PulseAudio is unavailable."
+
+            echo "The virtual computer will continue without audio."
+
+        fi
+
+
+        echo ""
+
+
+        # ====================================================
+        # FINAL CHECK
+        # ====================================================
+
+        echo "=========================================="
+        echo " Runtime checks"
+        echo "=========================================="
+
+        echo "User:"
+        whoami
+
+        echo ""
+
+        echo "Display:"
+        if xdpyinfo -display "$DISPLAY" >/dev/null 2>&1; then
+            echo "READY"
+        else
+            echo "FAILED"
+            exit 1
+        fi
+
+        echo ""
+
+        echo "PulseAudio:"
+        if pactl info >/dev/null 2>&1; then
+            echo "READY"
+        else
+            echo "UNAVAILABLE"
+        fi
+
+        echo ""
+
+        echo "=========================================="
+        echo " Starting backend"
+        echo "=========================================="
+
+        echo ""
+
+
+        # ====================================================
+        # START NODE BACKEND
+        # ====================================================
+
+        exec "$@"
+    ' -- "$@"
+    
