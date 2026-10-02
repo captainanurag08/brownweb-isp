@@ -47,6 +47,7 @@ RUN apt-get update && \
         pulseaudio-utils \
         ffmpeg \
         x11-utils \
+        dbus-x11 \
     && rm -rf /var/lib/apt/lists/*
 
 
@@ -69,7 +70,7 @@ COPY db ./db
 
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+RUN chmod 755 /usr/local/bin/docker-entrypoint.sh
 
 
 # ============================================================
@@ -81,13 +82,16 @@ RUN mkdir -p \
         /data/files \
         /tmp/avc-private \
         /tmp/runtime-pwuser \
-        /home/pwuser && \
+        /home/pwuser \
+        /tmp/.X11-unix && \
     chown -R pwuser:pwuser \
         /app \
         /data \
         /tmp/avc-private \
         /tmp/runtime-pwuser \
         /home/pwuser && \
+    chown root:root /tmp/.X11-unix && \
+    chmod 1777 /tmp/.X11-unix && \
     chmod 700 /tmp/runtime-pwuser
 
 
@@ -95,25 +99,13 @@ RUN mkdir -p \
 # IMPORTANT
 # ============================================================
 #
-# DO NOT use:
+# Keep the container entrypoint running as root.
 #
-# USER pwuser
+# It creates /tmp/.X11-unix at runtime, then starts the
+# browser environment under pwuser.
 #
-# here.
-#
-# The entrypoint needs temporary root privileges at container
-# startup to recreate /tmp/.X11-unix because /tmp can be reset
-# when the container starts.
-#
-# The entrypoint creates the X11 directory as:
-#
-#     root:root
-#     chmod 1777
-#
-# and then drops to pwuser before starting Xvfb, PulseAudio
-# and Node.
+# The Node process itself will run as pwuser.
 # ============================================================
-
 
 EXPOSE 4000
 
