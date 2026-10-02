@@ -1,36 +1,68 @@
-import type { Request, Response, NextFunction } from 'express';
-import type { ZodTypeAny } from 'zod';
-import { AppError } from '../utils/AppError';
+import {
+  Pool,
+  type PoolClient,
+  type QueryResultRow,
+} from 'pg';
 
-type Part = 'body' | 'query' | 'params';
+import { env } from '../config/env';
+import { logger } from '../utils/logger';
 
-export function validate(part: Part, schema: ZodTypeAny) {
-  return (req: Request, _res: Response, next: NextFunction) => {
-    const result = schema.safeParse(req[part]);
+export const pool = new Pool({
+  connectionString: env.databaseUrl,
+  max: 20,
+  idleTimeoutMillis: 30_000,
+});
 
-    if (!result.success) {
-      const message =
-        result.error.issues[0]?.message ?? 'Invalid request.';
+pool.on('error', (err: Error) => {
+  logger.error('Unexpected Postgres pool error', {
+    error: String(err),
+  });
+});
 
-      return next(
-        AppError.badRequest(message, 'invalid_input')
-      );
+export async function query<
+  T extends QueryResultRow = QueryResultRow
+>(
+  text: string,
+  params: unknown[] = []
+): Promise<T[]> {
+  const result = await pool.query<T>(text, params);
+  return result.rows;
+}
+
+export async function queryOne<
+  T extends QueryResultRow = QueryResultRow
+>(
+  text: string,
+  params: unknown[] = []
+): Promise<T | null> {
+  const rows = await query<T>(text, params);
+  return rows[0] ?? null;
+}
+
+export async function withTransaction<T>(
+  fn: (client: PoolClient) => Promise<T>
+): Promise<T> {
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const result = await fn(client);
+
+    await client.query('COMMIT');
+
+    return result;
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (rollbackError) {
+      logger.error('Postgres rollback failed', {
+        error: String(rollbackError),
+      });
     }
 
-    /*
-     * Express 5 exposes req.query through a getter.
-     * Do NOT assign back to req.query.
-     *
-     * The existing routes already validate and then read
-     * req.query/body/params with their appropriate types.
-     *
-     * For body and params, assignment is still safe and useful.
-     * For query, validation is performed without mutation.
-     */
-    if (part !== 'query') {
-      (req as unknown as Record<string, unknown>)[part] = result.data;
-    }
-
-    next();
-  };
+    throw err;
+  } finally {
+    client.release();
+  }
 }
