@@ -70,7 +70,11 @@ COPY db ./db
 
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
-RUN chmod 755 /usr/local/bin/docker-entrypoint.sh
+COPY avc-runtime.sh /usr/local/bin/avc-runtime.sh
+
+RUN chmod 755 \
+    /usr/local/bin/docker-entrypoint.sh \
+    /usr/local/bin/avc-runtime.sh
 
 
 # ============================================================
