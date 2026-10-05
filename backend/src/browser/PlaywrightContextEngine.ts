@@ -118,22 +118,56 @@ export class PlaywrightContextEngine extends BrowserEngine {
 
     try {
       context = await chromium.launchPersistentContext(
-        opts.profileDir,
-        {
-          headless: env.browserHeadless,
+  opts.profileDir,
+  {
+    headless: env.browserHeadless,
 
-          viewport: {
-            width: env.screencastMaxWidth,
-            height: env.screencastMaxHeight,
-          },
+    viewport: {
+      width: env.screencastMaxWidth,
+      height: env.screencastMaxHeight,
+    },
 
-          hasTouch: true,
-          isMobile: false,
-          acceptDownloads: true,
+    hasTouch: true,
+    isMobile: false,
+    acceptDownloads: true,
 
-          ignoreHTTPSErrors: false,
+    ignoreHTTPSErrors: false,
 
-          env: browserEnv,
+    env: browserEnv,
+
+    ...(proxy
+      ? {
+          proxy,
+        }
+      : {}),
+
+    locale:
+      location.locale,
+
+    timezoneId:
+      location.timezoneId,
+
+    geolocation: {
+      latitude:
+        location.latitude,
+
+      longitude:
+        location.longitude,
+
+      accuracy:
+        location.accuracy,
+    },
+
+    permissions: [
+      'geolocation',
+    ],
+
+    extraHTTPHeaders: {
+      'Accept-Language':
+        location.acceptLanguage,
+    },
+
+   
 
           args: [
             '--no-sandbox',
