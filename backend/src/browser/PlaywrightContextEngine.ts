@@ -108,7 +108,12 @@ export class PlaywrightContextEngine extends BrowserEngine {
             'unix:/tmp/runtime-pwuser/pulse/native',
         }
       : undefined;
+    const proxy =
+  getBrowserProxyConfig();
 
+    const location =
+  getBrowserLocationConfig();
+    
     let context: BrowserContext;
 
     try {
