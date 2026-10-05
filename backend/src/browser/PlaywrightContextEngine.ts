@@ -17,6 +17,14 @@ import { env } from '../config/env';
 import { query, queryOne } from '../db/pool';
 import { logger } from '../utils/logger';
 
+import {
+  getBrowserProxyConfig,
+} from './browserProxy';
+
+import {
+  getBrowserLocationConfig,
+} from './browserLocation';
+
 interface TabState {
   page: Page;
   cdp: CDPSession | null;
