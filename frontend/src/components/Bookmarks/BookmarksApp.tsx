@@ -281,17 +281,19 @@ export function BookmarksApp() {
         }}
       >
         <div
-          style={{
-            position: 'absolute',
-            left: 12,
-            top: '50%',
-            transform: 'translateY(-50%)',
-            color: 'var(--text-muted)',
-            pointerEvents: 'none',
-          }}
-        >
-          <Icon name="search" size={15} />
-        </div>
+  style={{
+    position: 'absolute',
+    left: 12,
+    top: '50%',
+    transform: 'translateY(-50%)',
+    color: 'var(--text-muted)',
+    pointerEvents: 'none',
+    fontSize: 16,
+    lineHeight: 1,
+  }}
+>
+  ⌕
+</div>
 
         <input
           className="field"
