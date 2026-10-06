@@ -1,4 +1,3 @@
-```tsx
 import { useEffect, useState } from 'react';
 import { api } from '../../services/api';
 import { useStore } from '../../state/store';
@@ -63,7 +62,6 @@ export function BookmarksApp() {
 
       setTitle('');
       setUrl('');
-
       await load();
     } catch (err) {
       console.error('Failed to add bookmark:', err);
@@ -79,9 +77,9 @@ export function BookmarksApp() {
     }
   }
 
-  function open(u: string) {
+  function open(urlToOpen: string) {
     setCurrentApp('browser');
-    newTab(u);
+    newTab(urlToOpen);
   }
 
   function generateTitle(urlString: string): string {
@@ -99,17 +97,17 @@ export function BookmarksApp() {
       .map((line) => line.trim())
       .filter((line) => line.length > 0);
 
-    const parsed: BulkBookmark[] = [];
+    const result: BulkBookmark[] = [];
 
     for (const line of lines) {
       let bookmarkTitle = '';
       let bookmarkUrl = '';
 
-      if (line.includes('|')) {
-        const separatorIndex = line.indexOf('|');
+      const separator = line.indexOf('|');
 
-        bookmarkTitle = line.slice(0, separatorIndex).trim();
-        bookmarkUrl = line.slice(separatorIndex + 1).trim();
+      if (separator >= 0) {
+        bookmarkTitle = line.slice(0, separator).trim();
+        bookmarkUrl = line.slice(separator + 1).trim();
       } else {
         bookmarkUrl = line;
         bookmarkTitle = generateTitle(bookmarkUrl);
@@ -130,7 +128,7 @@ export function BookmarksApp() {
           bookmarkTitle = generateTitle(bookmarkUrl);
         }
 
-        parsed.push({
+        result.push({
           title: bookmarkTitle,
           url: bookmarkUrl,
         });
@@ -139,7 +137,7 @@ export function BookmarksApp() {
       }
     }
 
-    return parsed;
+    return result;
   }
 
   const parsedBulk = parseBulkText(bulkText);
@@ -149,14 +147,12 @@ export function BookmarksApp() {
     setImportError('');
 
     if (parsedBulk.length === 0) {
-      setImportError(
-        'No valid bookmarks found. Use Title | URL or enter one URL per line.'
-      );
+      setImportError('No valid bookmarks found.');
       return;
     }
 
     if (parsedBulk.length > 500) {
-      setImportError('You can import a maximum of 500 bookmarks at once.');
+      setImportError('Maximum 500 bookmarks can be imported at once.');
       return;
     }
 
@@ -171,9 +167,9 @@ export function BookmarksApp() {
       );
 
       setImportMessage(
-        `${result.count} bookmark${
-          result.count === 1 ? '' : 's'
-        } imported successfully.`
+        result.count === 1
+          ? '1 bookmark imported successfully.'
+          : `${result.count} bookmarks imported successfully.`
       );
 
       setBulkText('');
@@ -186,7 +182,7 @@ export function BookmarksApp() {
       console.error('Bulk bookmark import failed:', err);
 
       setImportError(
-        'Import failed. Make sure the backend /bookmarks/bulk endpoint is deployed.'
+        'Import failed. Make sure the backend bulk bookmark endpoint is deployed.'
       );
     } finally {
       setImporting(false);
@@ -236,7 +232,7 @@ export function BookmarksApp() {
           className="btn"
           type="button"
           onClick={() => {
-            setShowBulkImport((value) => !value);
+            setShowBulkImport(!showBulkImport);
             setImportMessage('');
             setImportError('');
           }}
@@ -274,7 +270,7 @@ export function BookmarksApp() {
 
         <input
           className="field"
-          placeholder="https://…"
+          placeholder="https://..."
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           style={{
@@ -324,7 +320,7 @@ export function BookmarksApp() {
                   lineHeight: 1.5,
                 }}
               >
-                Paste multiple bookmarks at once. One bookmark per line.
+                Paste multiple bookmarks at once, one bookmark per line.
               </div>
             </div>
 
@@ -359,23 +355,19 @@ export function BookmarksApp() {
               style={{
                 color: 'var(--text)',
                 fontWeight: 600,
-                marginBottom: 3,
+                marginBottom: 4,
               }}
             >
-              Supported formats
+              Supported format
             </div>
 
-            <div>
-              <span className="mono">
-                Google | https://google.com
-              </span>
+            <div className="mono">
+              Google | https://google.com
             </div>
 
-            <div>
-              <span className="mono">
-                https://github.com
-              </span>
-              {' '}→ title generated automatically
+            <div style={{ marginTop: 3 }}>
+              You can also paste a URL by itself. Its domain will become the
+              title.
             </div>
           </div>
 
@@ -387,7 +379,7 @@ export function BookmarksApp() {
               setImportMessage('');
               setImportError('');
             }}
-            placeholder="Google | https://www.google.com&#10;YouTube | https://www.youtube.com&#10;GitHub | https://github.com&#10;Wikipedia | https://www.wikipedia.org&#10;&#10;Or simply paste URLs, one per line."
+            placeholder="Google | https://www.google.com&#10;YouTube | https://www.youtube.com&#10;GitHub | https://github.com&#10;Wikipedia | https://www.wikipedia.org&#10;&#10;Or paste URLs, one per line."
             style={{
               width: '100%',
               minHeight: 190,
@@ -424,7 +416,6 @@ export function BookmarksApp() {
                 fontSize: 12,
                 background: 'var(--surface)',
                 border: '1px solid var(--border)',
-                color: 'var(--text)',
               }}
             >
               {importError}
@@ -468,7 +459,7 @@ export function BookmarksApp() {
                   setImportMessage('');
                   setImportError('');
                 }}
-                disabled={importing || !bulkText}
+                disabled={importing || bulkText.length === 0}
               >
                 Clear
               </button>
@@ -483,7 +474,7 @@ export function BookmarksApp() {
                 }}
               >
                 {importing
-                  ? 'Importing…'
+                  ? 'Importing...'
                   : `Import ${parsedBulk.length || ''}`}
               </button>
             </div>
@@ -507,9 +498,9 @@ export function BookmarksApp() {
             gap: 6,
           }}
         >
-          {bookmarks.map((b) => (
+          {bookmarks.map((bookmark) => (
             <div
-              key={b.id}
+              key={bookmark.id}
               className="panel"
               style={{
                 padding: '10px 14px',
@@ -521,7 +512,7 @@ export function BookmarksApp() {
               <Icon name="star" size={15} />
 
               <button
-                onClick={() => open(b.url)}
+                onClick={() => open(bookmark.url)}
                 style={{
                   flex: 1,
                   textAlign: 'left',
@@ -536,7 +527,7 @@ export function BookmarksApp() {
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  {b.title}
+                  {bookmark.title}
                 </div>
 
                 <div
@@ -549,12 +540,12 @@ export function BookmarksApp() {
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  {b.url}
+                  {bookmark.url}
                 </div>
               </button>
 
               <button
-                onClick={() => remove(b.id)}
+                onClick={() => remove(bookmark.id)}
                 style={{
                   color: 'var(--text-muted)',
                   flexShrink: 0,
@@ -570,4 +561,3 @@ export function BookmarksApp() {
     </div>
   );
 }
-```
