@@ -17,6 +17,11 @@ interface BulkBookmark {
   url: string;
 }
 
+interface BulkImportResponse {
+  bookmarks: Bookmark[];
+  count: number;
+}
+
 export function BookmarksApp() {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   const [title, setTitle] = useState('');
@@ -46,7 +51,9 @@ export function BookmarksApp() {
   async function add(e: React.FormEvent) {
     e.preventDefault();
 
-    if (!title.trim() || !url.trim()) return;
+    if (!title.trim() || !url.trim()) {
+      return;
+    }
 
     try {
       await api.post('/bookmarks', {
@@ -56,6 +63,7 @@ export function BookmarksApp() {
 
       setTitle('');
       setUrl('');
+
       await load();
     } catch (err) {
       console.error('Failed to add bookmark:', err);
@@ -89,25 +97,27 @@ export function BookmarksApp() {
     const lines = text
       .split(/\r?\n/)
       .map((line) => line.trim())
-      .filter(Boolean);
+      .filter((line) => line.length > 0);
 
     const parsed: BulkBookmark[] = [];
 
     for (const line of lines) {
-      let title = '';
+      let bookmarkTitle = '';
       let bookmarkUrl = '';
 
       if (line.includes('|')) {
         const separatorIndex = line.indexOf('|');
 
-        title = line.slice(0, separatorIndex).trim();
+        bookmarkTitle = line.slice(0, separatorIndex).trim();
         bookmarkUrl = line.slice(separatorIndex + 1).trim();
       } else {
         bookmarkUrl = line;
-        title = generateTitle(bookmarkUrl);
+        bookmarkTitle = generateTitle(bookmarkUrl);
       }
 
-      if (!bookmarkUrl) continue;
+      if (!bookmarkUrl) {
+        continue;
+      }
 
       if (!/^https?:\/\//i.test(bookmarkUrl)) {
         bookmarkUrl = `https://${bookmarkUrl}`;
@@ -116,17 +126,16 @@ export function BookmarksApp() {
       try {
         new URL(bookmarkUrl);
 
-        if (!title) {
-          title = generateTitle(bookmarkUrl);
+        if (!bookmarkTitle) {
+          bookmarkTitle = generateTitle(bookmarkUrl);
         }
 
         parsed.push({
-          title,
+          title: bookmarkTitle,
           url: bookmarkUrl,
         });
       } catch {
-        // Ignore invalid lines here.
-        // The import preview will show the number of valid entries.
+        continue;
       }
     }
 
@@ -140,7 +149,9 @@ export function BookmarksApp() {
     setImportError('');
 
     if (parsedBulk.length === 0) {
-      setImportError('No valid bookmarks found. Check your format and try again.');
+      setImportError(
+        'No valid bookmarks found. Use Title | URL or enter one URL per line.'
+      );
       return;
     }
 
@@ -152,28 +163,30 @@ export function BookmarksApp() {
     setImporting(true);
 
     try {
-      const result = await api.post<{
-        bookmarks: Bookmark[];
-        count: number;
-      }>('/bookmarks/bulk', {
-        bookmarks: parsedBulk,
-      });
+      const result = await api.post<BulkImportResponse>(
+        '/bookmarks/bulk',
+        {
+          bookmarks: parsedBulk,
+        }
+      );
 
       setImportMessage(
-        `${result.count} bookmark${result.count === 1 ? '' : 's'} imported successfully.`
+        `${result.count} bookmark${
+          result.count === 1 ? '' : 's'
+        } imported successfully.`
       );
 
       setBulkText('');
       await load();
 
-      setTimeout(() => {
+      window.setTimeout(() => {
         setImportMessage('');
       }, 4000);
     } catch (err) {
       console.error('Bulk bookmark import failed:', err);
 
       setImportError(
-        'Import failed. Make sure the backend /bookmarks/bulk endpoint is deployed and available.'
+        'Import failed. Make sure the backend /bookmarks/bulk endpoint is deployed.'
       );
     } finally {
       setImporting(false);
@@ -189,7 +202,6 @@ export function BookmarksApp() {
         boxSizing: 'border-box',
       }}
     >
-      {/* Header */}
       <div
         style={{
           display: 'flex',
@@ -240,7 +252,6 @@ export function BookmarksApp() {
         </button>
       </div>
 
-      {/* Single bookmark form */}
       <form
         onSubmit={add}
         style={{
@@ -277,7 +288,6 @@ export function BookmarksApp() {
         </button>
       </form>
 
-      {/* Bulk import panel */}
       {showBulkImport && (
         <div
           className="panel"
@@ -287,7 +297,6 @@ export function BookmarksApp() {
             borderRadius: 14,
           }}
         >
-          {/* Import header */}
           <div
             style={{
               display: 'flex',
@@ -334,7 +343,6 @@ export function BookmarksApp() {
             </div>
           </div>
 
-          {/* Format helper */}
           <div
             style={{
               marginTop: 14,
@@ -347,21 +355,30 @@ export function BookmarksApp() {
               color: 'var(--text-muted)',
             }}
           >
-            <div style={{ color: 'var(--text)', fontWeight: 600, marginBottom: 3 }}>
+            <div
+              style={{
+                color: 'var(--text)',
+                fontWeight: 600,
+                marginBottom: 3,
+              }}
+            >
               Supported formats
             </div>
 
             <div>
-              <span className="mono">Google | https://google.com</span>
+              <span className="mono">
+                Google | https://google.com
+              </span>
             </div>
 
             <div>
-              <span className="mono">https://github.com</span>
-              {' '}→ title is generated automatically
+              <span className="mono">
+                https://github.com
+              </span>
+              {' '}→ title generated automatically
             </div>
           </div>
 
-          {/* Text area */}
           <textarea
             className="field"
             value={bulkText}
@@ -370,15 +387,7 @@ export function BookmarksApp() {
               setImportMessage('');
               setImportError('');
             }}
-            placeholder={`Google | https://www.google.com
-YouTube | https://www.youtube.com
-GitHub | https://github.com
-Wikipedia | https://www.wikipedia.org
-
-or simply:
-
-https://reddit.com
-https://stackoverflow.com`}
+            placeholder="Google | https://www.google.com&#10;YouTube | https://www.youtube.com&#10;GitHub | https://github.com&#10;Wikipedia | https://www.wikipedia.org&#10;&#10;Or simply paste URLs, one per line."
             style={{
               width: '100%',
               minHeight: 190,
@@ -391,7 +400,6 @@ https://stackoverflow.com`}
             }}
           />
 
-          {/* Status */}
           {importMessage && (
             <div
               style={{
@@ -423,7 +431,6 @@ https://stackoverflow.com`}
             </div>
           )}
 
-          {/* Actions */}
           <div
             style={{
               display: 'flex',
@@ -441,11 +448,18 @@ https://stackoverflow.com`}
               }}
             >
               {parsedBulk.length > 0
-                ? `${parsedBulk.length} valid bookmark${parsedBulk.length === 1 ? '' : 's'} detected`
+                ? `${parsedBulk.length} valid bookmark${
+                    parsedBulk.length === 1 ? '' : 's'
+                  } detected`
                 : 'Nothing ready to import'}
             </div>
 
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div
+              style={{
+                display: 'flex',
+                gap: 8,
+              }}
+            >
               <button
                 className="btn"
                 type="button"
@@ -468,18 +482,21 @@ https://stackoverflow.com`}
                   minWidth: 120,
                 }}
               >
-                {importing ? 'Importing…' : `Import ${parsedBulk.length || ''}`}
+                {importing
+                  ? 'Importing…'
+                  : `Import ${parsedBulk.length || ''}`}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Bookmark list */}
       {bookmarks.length === 0 ? (
         <div className="empty-state">
           <strong>No bookmarks yet</strong>
-          <span>Save pages here so you can get back to them quickly.</span>
+          <span>
+            Save pages here so you can get back to them quickly.
+          </span>
         </div>
       ) : (
         <div
