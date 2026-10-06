@@ -44,7 +44,7 @@ export function AppLauncher() {
       {/* START SERVER */}
       <div className="bw-server-wrapper">
         <a
-          href="https://YOUR-SERVER-SITE.com"
+          href="https://brownweb-isp.onrender.com/"
           target="_blank"
           rel="noopener noreferrer"
           className="bw-start-server"
