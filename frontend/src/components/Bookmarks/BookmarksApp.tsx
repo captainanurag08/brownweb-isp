@@ -1,3 +1,4 @@
+```tsx
 import { useEffect, useState } from 'react';
 import { api } from '../../services/api';
 import { useStore } from '../../state/store';
@@ -7,34 +8,67 @@ interface Bookmark {
   id: string;
   title: string;
   url: string;
+  favicon?: string | null;
+  folder_id?: string | null;
+}
+
+interface BulkBookmark {
+  title: string;
+  url: string;
 }
 
 export function BookmarksApp() {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   const [title, setTitle] = useState('');
   const [url, setUrl] = useState('');
+
+  const [showBulkImport, setShowBulkImport] = useState(false);
+  const [bulkText, setBulkText] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [importMessage, setImportMessage] = useState('');
+  const [importError, setImportError] = useState('');
+
   const { setCurrentApp, newTab } = useStore();
 
   async function load() {
-    const data = await api.get<{ bookmarks: Bookmark[] }>('/bookmarks');
-    setBookmarks(data.bookmarks);
+    try {
+      const data = await api.get<{ bookmarks: Bookmark[] }>('/bookmarks');
+      setBookmarks(data.bookmarks);
+    } catch (err) {
+      console.error('Failed to load bookmarks:', err);
+    }
   }
+
   useEffect(() => {
     load();
   }, []);
 
   async function add(e: React.FormEvent) {
     e.preventDefault();
-    if (!title || !url) return;
-    await api.post('/bookmarks', { title, url });
-    setTitle('');
-    setUrl('');
-    load();
+
+    if (!title.trim() || !url.trim()) return;
+
+    try {
+      await api.post('/bookmarks', {
+        title: title.trim(),
+        url: url.trim(),
+      });
+
+      setTitle('');
+      setUrl('');
+      await load();
+    } catch (err) {
+      console.error('Failed to add bookmark:', err);
+    }
   }
 
   async function remove(id: string) {
-    await api.delete(`/bookmarks/${id}`);
-    load();
+    try {
+      await api.delete(`/bookmarks/${id}`);
+      await load();
+    } catch (err) {
+      console.error('Failed to remove bookmark:', err);
+    }
   }
 
   function open(u: string) {
@@ -42,35 +76,474 @@ export function BookmarksApp() {
     newTab(u);
   }
 
-  return (
-    <div style={{ padding: 24, height: '100%', overflowY: 'auto' }}>
-      <div style={{ fontFamily: 'var(--font-display)', fontSize: 18, fontWeight: 600 }}>Bookmarks</div>
+  function generateTitle(urlString: string): string {
+    try {
+      const parsed = new URL(urlString);
+      return parsed.hostname.replace(/^www\./, '');
+    } catch {
+      return urlString;
+    }
+  }
 
-      <form onSubmit={add} style={{ display: 'flex', gap: 8, marginTop: 14 }}>
-        <input className="field" placeholder="Title" value={title} onChange={(e) => setTitle(e.target.value)} />
-        <input className="field" placeholder="https://…" value={url} onChange={(e) => setUrl(e.target.value)} />
+  function parseBulkText(text: string): BulkBookmark[] {
+    const lines = text
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    const parsed: BulkBookmark[] = [];
+
+    for (const line of lines) {
+      let title = '';
+      let bookmarkUrl = '';
+
+      if (line.includes('|')) {
+        const separatorIndex = line.indexOf('|');
+
+        title = line.slice(0, separatorIndex).trim();
+        bookmarkUrl = line.slice(separatorIndex + 1).trim();
+      } else {
+        bookmarkUrl = line;
+        title = generateTitle(bookmarkUrl);
+      }
+
+      if (!bookmarkUrl) continue;
+
+      if (!/^https?:\/\//i.test(bookmarkUrl)) {
+        bookmarkUrl = `https://${bookmarkUrl}`;
+      }
+
+      try {
+        new URL(bookmarkUrl);
+
+        if (!title) {
+          title = generateTitle(bookmarkUrl);
+        }
+
+        parsed.push({
+          title,
+          url: bookmarkUrl,
+        });
+      } catch {
+        // Ignore invalid lines here.
+        // The import preview will show the number of valid entries.
+      }
+    }
+
+    return parsed;
+  }
+
+  const parsedBulk = parseBulkText(bulkText);
+
+  async function importBookmarks() {
+    setImportMessage('');
+    setImportError('');
+
+    if (parsedBulk.length === 0) {
+      setImportError('No valid bookmarks found. Check your format and try again.');
+      return;
+    }
+
+    if (parsedBulk.length > 500) {
+      setImportError('You can import a maximum of 500 bookmarks at once.');
+      return;
+    }
+
+    setImporting(true);
+
+    try {
+      const result = await api.post<{
+        bookmarks: Bookmark[];
+        count: number;
+      }>('/bookmarks/bulk', {
+        bookmarks: parsedBulk,
+      });
+
+      setImportMessage(
+        `${result.count} bookmark${result.count === 1 ? '' : 's'} imported successfully.`
+      );
+
+      setBulkText('');
+      await load();
+
+      setTimeout(() => {
+        setImportMessage('');
+      }, 4000);
+    } catch (err) {
+      console.error('Bulk bookmark import failed:', err);
+
+      setImportError(
+        'Import failed. Make sure the backend /bookmarks/bulk endpoint is deployed and available.'
+      );
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  return (
+    <div
+      style={{
+        padding: 24,
+        height: '100%',
+        overflowY: 'auto',
+        boxSizing: 'border-box',
+      }}
+    >
+      {/* Header */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 16,
+        }}
+      >
+        <div>
+          <div
+            style={{
+              fontFamily: 'var(--font-display)',
+              fontSize: 18,
+              fontWeight: 600,
+            }}
+          >
+            Bookmarks
+          </div>
+
+          <div
+            style={{
+              marginTop: 4,
+              fontSize: 12,
+              color: 'var(--text-muted)',
+            }}
+          >
+            Save and organize pages you want to revisit.
+          </div>
+        </div>
+
+        <button
+          className="btn"
+          type="button"
+          onClick={() => {
+            setShowBulkImport((value) => !value);
+            setImportMessage('');
+            setImportError('');
+          }}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 7,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          <Icon name="plus" size={14} />
+          {showBulkImport ? 'Close Import' : 'Bulk Import'}
+        </button>
+      </div>
+
+      {/* Single bookmark form */}
+      <form
+        onSubmit={add}
+        style={{
+          display: 'flex',
+          gap: 8,
+          marginTop: 18,
+          flexWrap: 'wrap',
+        }}
+      >
+        <input
+          className="field"
+          placeholder="Title"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          style={{
+            flex: '1 1 180px',
+            minWidth: 0,
+          }}
+        />
+
+        <input
+          className="field"
+          placeholder="https://…"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          style={{
+            flex: '2 1 280px',
+            minWidth: 0,
+          }}
+        />
+
         <button className="btn btn-primary" type="submit">
           <Icon name="plus" size={14} />
         </button>
       </form>
 
+      {/* Bulk import panel */}
+      {showBulkImport && (
+        <div
+          className="panel"
+          style={{
+            marginTop: 18,
+            padding: 18,
+            borderRadius: 14,
+          }}
+        >
+          {/* Import header */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              justifyContent: 'space-between',
+              gap: 12,
+            }}
+          >
+            <div>
+              <div
+                style={{
+                  fontFamily: 'var(--font-display)',
+                  fontSize: 15,
+                  fontWeight: 600,
+                }}
+              >
+                Bulk Import
+              </div>
+
+              <div
+                style={{
+                  marginTop: 5,
+                  fontSize: 12,
+                  color: 'var(--text-muted)',
+                  lineHeight: 1.5,
+                }}
+              >
+                Paste multiple bookmarks at once. One bookmark per line.
+              </div>
+            </div>
+
+            <div
+              style={{
+                padding: '5px 9px',
+                borderRadius: 8,
+                fontSize: 11,
+                color: 'var(--text-muted)',
+                background: 'var(--surface)',
+                border: '1px solid var(--border)',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {parsedBulk.length}/500 ready
+            </div>
+          </div>
+
+          {/* Format helper */}
+          <div
+            style={{
+              marginTop: 14,
+              padding: 12,
+              borderRadius: 10,
+              background: 'var(--surface)',
+              border: '1px solid var(--border)',
+              fontSize: 11,
+              lineHeight: 1.7,
+              color: 'var(--text-muted)',
+            }}
+          >
+            <div style={{ color: 'var(--text)', fontWeight: 600, marginBottom: 3 }}>
+              Supported formats
+            </div>
+
+            <div>
+              <span className="mono">Google | https://google.com</span>
+            </div>
+
+            <div>
+              <span className="mono">https://github.com</span>
+              {' '}→ title is generated automatically
+            </div>
+          </div>
+
+          {/* Text area */}
+          <textarea
+            className="field"
+            value={bulkText}
+            onChange={(e) => {
+              setBulkText(e.target.value);
+              setImportMessage('');
+              setImportError('');
+            }}
+            placeholder={`Google | https://www.google.com
+YouTube | https://www.youtube.com
+GitHub | https://github.com
+Wikipedia | https://www.wikipedia.org
+
+or simply:
+
+https://reddit.com
+https://stackoverflow.com`}
+            style={{
+              width: '100%',
+              minHeight: 190,
+              marginTop: 12,
+              resize: 'vertical',
+              boxSizing: 'border-box',
+              fontFamily: 'var(--font-mono, monospace)',
+              fontSize: 12,
+              lineHeight: 1.6,
+            }}
+          />
+
+          {/* Status */}
+          {importMessage && (
+            <div
+              style={{
+                marginTop: 10,
+                padding: '9px 11px',
+                borderRadius: 9,
+                fontSize: 12,
+                background: 'var(--surface)',
+                border: '1px solid var(--border)',
+              }}
+            >
+              {importMessage}
+            </div>
+          )}
+
+          {importError && (
+            <div
+              style={{
+                marginTop: 10,
+                padding: '9px 11px',
+                borderRadius: 9,
+                fontSize: 12,
+                background: 'var(--surface)',
+                border: '1px solid var(--border)',
+                color: 'var(--text)',
+              }}
+            >
+              {importError}
+            </div>
+          )}
+
+          {/* Actions */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+              marginTop: 12,
+              flexWrap: 'wrap',
+            }}
+          >
+            <div
+              style={{
+                fontSize: 11,
+                color: 'var(--text-muted)',
+              }}
+            >
+              {parsedBulk.length > 0
+                ? `${parsedBulk.length} valid bookmark${parsedBulk.length === 1 ? '' : 's'} detected`
+                : 'Nothing ready to import'}
+            </div>
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                className="btn"
+                type="button"
+                onClick={() => {
+                  setBulkText('');
+                  setImportMessage('');
+                  setImportError('');
+                }}
+                disabled={importing || !bulkText}
+              >
+                Clear
+              </button>
+
+              <button
+                className="btn btn-primary"
+                type="button"
+                onClick={importBookmarks}
+                disabled={importing || parsedBulk.length === 0}
+                style={{
+                  minWidth: 120,
+                }}
+              >
+                {importing ? 'Importing…' : `Import ${parsedBulk.length || ''}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bookmark list */}
       {bookmarks.length === 0 ? (
         <div className="empty-state">
           <strong>No bookmarks yet</strong>
           <span>Save pages here so you can get back to them quickly.</span>
         </div>
       ) : (
-        <div style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div
+          style={{
+            marginTop: 20,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+          }}
+        >
           {bookmarks.map((b) => (
-            <div key={b.id} className="panel" style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div
+              key={b.id}
+              className="panel"
+              style={{
+                padding: '10px 14px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+              }}
+            >
               <Icon name="star" size={15} />
-              <button onClick={() => open(b.url)} style={{ flex: 1, textAlign: 'left', minWidth: 0 }}>
-                <div style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.title}</div>
-                <div className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+
+              <button
+                onClick={() => open(b.url)}
+                style={{
+                  flex: 1,
+                  textAlign: 'left',
+                  minWidth: 0,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 13,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {b.title}
+                </div>
+
+                <div
+                  className="mono"
+                  style={{
+                    fontSize: 11,
+                    color: 'var(--text-muted)',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
                   {b.url}
                 </div>
               </button>
-              <button onClick={() => remove(b.id)} style={{ color: 'var(--text-muted)' }}>
+
+              <button
+                onClick={() => remove(b.id)}
+                style={{
+                  color: 'var(--text-muted)',
+                  flexShrink: 0,
+                }}
+                title="Delete bookmark"
+              >
                 <Icon name="trash" size={14} />
               </button>
             </div>
@@ -80,3 +553,4 @@ export function BookmarksApp() {
     </div>
   );
 }
+```
