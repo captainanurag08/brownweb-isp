@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api } from '../../services/api';
 import { useStore } from '../../state/store';
 import { Icon } from '../icons/Icon';
@@ -25,6 +25,8 @@ export function BookmarksApp() {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   const [title, setTitle] = useState('');
   const [url, setUrl] = useState('');
+
+  const [search, setSearch] = useState('');
 
   const [showBulkImport, setShowBulkImport] = useState(false);
   const [bulkText, setBulkText] = useState('');
@@ -55,9 +57,15 @@ export function BookmarksApp() {
     }
 
     try {
+      let finalUrl = url.trim();
+
+      if (!/^https?:\/\//i.test(finalUrl)) {
+        finalUrl = `https://${finalUrl}`;
+      }
+
       await api.post('/bookmarks', {
         title: title.trim(),
-        url: url.trim(),
+        url: finalUrl,
       });
 
       setTitle('');
@@ -142,6 +150,21 @@ export function BookmarksApp() {
 
   const parsedBulk = parseBulkText(bulkText);
 
+  const filteredBookmarks = useMemo(() => {
+    const searchTerm = search.trim().toLowerCase();
+
+    if (!searchTerm) {
+      return bookmarks;
+    }
+
+    return bookmarks.filter((bookmark) => {
+      return (
+        bookmark.title.toLowerCase().includes(searchTerm) ||
+        bookmark.url.toLowerCase().includes(searchTerm)
+      );
+    });
+  }, [bookmarks, search]);
+
   async function importBookmarks() {
     setImportMessage('');
     setImportError('');
@@ -198,12 +221,14 @@ export function BookmarksApp() {
         boxSizing: 'border-box',
       }}
     >
+      {/* HEADER */}
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
           gap: 16,
+          flexWrap: 'wrap',
         }}
       >
         <div>
@@ -248,12 +273,66 @@ export function BookmarksApp() {
         </button>
       </div>
 
+      {/* SEARCH BAR */}
+      <div
+        style={{
+          position: 'relative',
+          marginTop: 18,
+        }}
+      >
+        <div
+          style={{
+            position: 'absolute',
+            left: 12,
+            top: '50%',
+            transform: 'translateY(-50%)',
+            color: 'var(--text-muted)',
+            pointerEvents: 'none',
+          }}
+        >
+          <Icon name="search" size={15} />
+        </div>
+
+        <input
+          className="field"
+          type="search"
+          placeholder="Search bookmarks by title or URL..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{
+            width: '100%',
+            boxSizing: 'border-box',
+            paddingLeft: 36,
+            paddingRight: search ? 38 : 12,
+          }}
+        />
+
+        {search && (
+          <button
+            type="button"
+            onClick={() => setSearch('')}
+            title="Clear search"
+            style={{
+              position: 'absolute',
+              right: 10,
+              top: '50%',
+              transform: 'translateY(-50%)',
+              color: 'var(--text-muted)',
+              padding: 4,
+            }}
+          >
+            ×
+          </button>
+        )}
+      </div>
+
+      {/* ADD BOOKMARK */}
       <form
         onSubmit={add}
         style={{
           display: 'flex',
           gap: 8,
-          marginTop: 18,
+          marginTop: 10,
           flexWrap: 'wrap',
         }}
       >
@@ -284,6 +363,7 @@ export function BookmarksApp() {
         </button>
       </form>
 
+      {/* BULK IMPORT */}
       {showBulkImport && (
         <div
           className="panel"
@@ -366,8 +446,7 @@ export function BookmarksApp() {
             </div>
 
             <div style={{ marginTop: 3 }}>
-              You can also paste a URL by itself. Its domain will become the
-              title.
+              You can also paste a URL by itself. Its domain becomes the title.
             </div>
           </div>
 
@@ -482,6 +561,25 @@ export function BookmarksApp() {
         </div>
       )}
 
+      {/* BOOKMARK COUNT */}
+      {bookmarks.length > 0 && (
+        <div
+          style={{
+            marginTop: 20,
+            marginBottom: 8,
+            fontSize: 11,
+            color: 'var(--text-muted)',
+          }}
+        >
+          {search
+            ? `${filteredBookmarks.length} of ${bookmarks.length} bookmarks`
+            : `${bookmarks.length} bookmark${
+                bookmarks.length === 1 ? '' : 's'
+              }`}
+        </div>
+      )}
+
+      {/* BOOKMARK LIST */}
       {bookmarks.length === 0 ? (
         <div className="empty-state">
           <strong>No bookmarks yet</strong>
@@ -489,16 +587,22 @@ export function BookmarksApp() {
             Save pages here so you can get back to them quickly.
           </span>
         </div>
+      ) : filteredBookmarks.length === 0 ? (
+        <div className="empty-state">
+          <strong>No matching bookmarks</strong>
+          <span>
+            Try a different title, website name, or URL.
+          </span>
+        </div>
       ) : (
         <div
           style={{
-            marginTop: 20,
             display: 'flex',
             flexDirection: 'column',
             gap: 6,
           }}
         >
-          {bookmarks.map((bookmark) => (
+          {filteredBookmarks.map((bookmark) => (
             <div
               key={bookmark.id}
               className="panel"
@@ -512,6 +616,7 @@ export function BookmarksApp() {
               <Icon name="star" size={15} />
 
               <button
+                type="button"
                 onClick={() => open(bookmark.url)}
                 style={{
                   flex: 1,
@@ -545,6 +650,7 @@ export function BookmarksApp() {
               </button>
 
               <button
+                type="button"
                 onClick={() => remove(bookmark.id)}
                 style={{
                   color: 'var(--text-muted)',
